@@ -50,7 +50,6 @@ function buildSocrataUrl(base, { permit, address, contractor, limit = 100 }) {
 
   return `${base}?${[where, search, select].filter(Boolean).join("&")}`;
 }
-
 function normalizeRecord(item) {
   return {
     permitNumber: item.permit_num || item.permit_number || "Permit",
@@ -379,76 +378,63 @@ export default function AustinPermitContractorApp() {
     setSortBy(snapshot.sortBy || "issued_desc");
   }
 
-  async function runSearch(activeSnapshot) {
-    const snap = activeSnapshot || snapshotSearch();
-    setLoading(true);
-    setError("");
-    setRecords([]);
-    setSourceUsed("");
-    setSelectedRecord(null);
+async function runSearch(activeSnapshot) {
+  const snap = activeSnapshot || snapshotSearch();
+  setLoading(true);
+  setError("");
+  setRecords([]);
+  setSourceUsed("");
+  setSelectedRecord(null);
 
-    async function attemptFetch(url, sourceLabel) {
-      const res = await fetch(url, { headers: { Accept: "application/json" } });
-      if (!res.ok) {
-        let details = "";
-        try {
-          details = await res.text();
-        } catch {
-          details = "";
-        }
-        throw new Error(`${sourceLabel} failed (${res.status})${details ? `: ${details.slice(0, 180)}` : ""}`);
-      }
-      const data = await res.json();
-      return Array.isArray(data) ? data : [];
-    }
-
-    try {
-      let primaryError = "";
-      let data = [];
-
+  async function attemptFetch(url, sourceLabel) {
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    if (!res.ok) {
+      let details = "";
       try {
-        data = await attemptFetch(buildSocrataUrl(issuedPermitsEndpoint, { ...snap, limit: 100 }), "Primary dataset lookup");
-      } catch (err) {
-        primaryError = err?.message || "Primary dataset lookup failed.";
+        details = await res.text();
+      } catch {
+        details = "";
       }
-
-      let normalized = [];
-
-      if (data.length > 0) {
-        normalized = data.map(normalizeRecord);
-        setSourceUsed("Issued Construction Permits dataset");
-      } else {
-        const backupData = await attemptFetch(buildSocrataUrl(buildingPermitsEndpoint, { ...snap, limit: 100 }), "Backup dataset lookup");
-        normalized = backupData.map(normalizeRecord);
-        setSourceUsed("Building Permits dataset");
-        if (!normalized.length && primaryError) {
-          setError(`${primaryError} Backup dataset returned no matching results.`);
-        }
-      }
-
-      if (snap.contractor?.trim()) {
-        normalized = normalized.filter((row) => row.contractor.toLowerCase().includes(snap.contractor.trim().toLowerCase()));
-      }
-
-      setRecords(normalized);
-      setSelectedRecord(normalized[0] || null);
-
-      const titleBits = [snap.permit, snap.address, snap.contractor].filter(Boolean);
-      const label = titleBits.length ? titleBits.join(" • ") : "Permit search";
-      const entry = {
-        id: `${slugify(label)}-${Date.now()}`,
-        label,
-        createdAt: new Date().toLocaleString(),
-        snapshot: snap,
-      };
-      saveRecentSearch(entry);
-      setRecentSearches(loadRecentSearches());
-    } catch (err) {
-      setError(err?.message || "Unable to fetch permit data.");
-    } finally {
-      setLoading(false);
+      throw new Error(`${sourceLabel} failed (${res.status})${details ? `: ${details.slice(0, 180)}` : ""}`);
     }
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
   }
+
+  try {
+    let normalized = await attemptFetch(
+      buildSocrataUrl(issuedPermitsEndpoint, { ...snap, limit: 100 }),
+      "Primary dataset lookup"
+    );
+
+    normalized = normalized.map(normalizeRecord);
+
+    if (snap.contractor?.trim()) {
+      normalized = normalized.filter((row) =>
+        row.contractor.toLowerCase().includes(snap.contractor.trim().toLowerCase())
+      );
+    }
+
+    setRecords(normalized);
+    setSourceUsed("Issued Construction Permits dataset");
+    setSelectedRecord(normalized[0] || null);
+
+    const titleBits = [snap.permit, snap.address, snap.contractor].filter(Boolean);
+    const label = titleBits.length ? titleBits.join(" • ") : "Permit search";
+    const entry = {
+      id: `${slugify(label)}-${Date.now()}`,
+      label,
+      createdAt: new Date().toLocaleString(),
+      snapshot: snap,
+    };
+    saveRecentSearch(entry);
+    setRecentSearches(loadRecentSearches());
+  } catch (err) {
+    setError(err?.message || "Unable to fetch permit data.");
+  } finally {
+    setLoading(false);
+  }
+}
 
   function resetFilters() {
     setStatusFilter("all");

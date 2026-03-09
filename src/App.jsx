@@ -46,11 +46,7 @@ function buildSocrataUrl(base, { permit, address, contractor, limit = 100 }) {
 
   const where = filters.length ? `$where=${encodeURIComponent(filters.join(" AND "))}` : "";
   const search = contractor?.trim() ? `$q=${encodeURIComponent(contractor.trim())}` : "";
-
-  const select =
-    base === issuedPermitsEndpoint
-      ? `$limit=${limit}&$order=issued_date DESC`
-      : `$limit=${limit}`;
+  const select = `$limit=${limit}`;
 
   return `${base}?${[where, search, select].filter(Boolean).join("&")}`;
 }

@@ -34,21 +34,15 @@ function formatDate(value) {
 }
 
 function buildSocrataUrl(base, { permit, address, contractor, limit = 100 }) {
-  const filters = [];
+  const terms = [permit, address, contractor]
+    .map((v) => String(v || "").trim())
+    .filter(Boolean)
+    .join(" ");
 
-  if (permit?.trim()) {
-    filters.push(`upper(permit_num) like upper('%${escapeSoql(permit.trim())}%')`);
-  }
-
-  if (address?.trim()) {
-    filters.push(`upper(issued_address) like upper('%${escapeSoql(address.trim())}%')`);
-  }
-
-  const where = filters.length ? `$where=${encodeURIComponent(filters.join(" AND "))}` : "";
-  const search = contractor?.trim() ? `$q=${encodeURIComponent(contractor.trim())}` : "";
+  const search = terms ? `$q=${encodeURIComponent(terms)}` : "";
   const select = `$limit=${limit}`;
 
-  return `${base}?${[where, search, select].filter(Boolean).join("&")}`;
+  return `${base}?${[search, select].filter(Boolean).join("&")}`;
 }
 function normalizeRecord(item) {
   return {
@@ -388,6 +382,7 @@ async function runSearch(activeSnapshot) {
 
   async function attemptFetch(url, sourceLabel) {
     const res = await fetch(url, { headers: { Accept: "application/json" } });
+
     if (!res.ok) {
       let details = "";
       try {
@@ -395,28 +390,53 @@ async function runSearch(activeSnapshot) {
       } catch {
         details = "";
       }
-      throw new Error(`${sourceLabel} failed (${res.status})${details ? `: ${details.slice(0, 180)}` : ""}`);
+      throw new Error(
+        `${sourceLabel} failed (${res.status})${details ? `: ${details.slice(0, 180)}` : ""}`
+      );
     }
+
     const data = await res.json();
     return Array.isArray(data) ? data : [];
   }
 
+  function matchesClientSide(row, snapshot) {
+    const permitText = String(row.permitNumber || "").toLowerCase();
+    const addressText = String(row.address || "").toLowerCase();
+    const contractorText = String(row.contractor || "").toLowerCase();
+
+    const permitNeedle = String(snapshot.permit || "").trim().toLowerCase();
+    const addressNeedle = String(snapshot.address || "").trim().toLowerCase();
+    const contractorNeedle = String(snapshot.contractor || "").trim().toLowerCase();
+
+    const permitOk = !permitNeedle || permitText.includes(permitNeedle);
+    const addressOk = !addressNeedle || addressText.includes(addressNeedle);
+    const contractorOk = !contractorNeedle || contractorText.includes(contractorNeedle);
+
+    return permitOk && addressOk && contractorOk;
+  }
+
   try {
-    let normalized = await attemptFetch(
-      buildSocrataUrl(issuedPermitsEndpoint, { ...snap, limit: 100 }),
-      "Primary dataset lookup"
-    );
+    let data = [];
+    let sourceLabel = "";
 
-    normalized = normalized.map(normalizeRecord);
-
-    if (snap.contractor?.trim()) {
-      normalized = normalized.filter((row) =>
-        row.contractor.toLowerCase().includes(snap.contractor.trim().toLowerCase())
+    try {
+      data = await attemptFetch(
+        buildSocrataUrl(issuedPermitsEndpoint, { ...snap, limit: 100 }),
+        "Primary dataset lookup"
       );
+      sourceLabel = "Issued Construction Permits dataset";
+    } catch (primaryErr) {
+      data = await attemptFetch(
+        buildSocrataUrl(buildingPermitsEndpoint, { ...snap, limit: 100 }),
+        "Backup dataset lookup"
+      );
+      sourceLabel = "Issued Building Permits dataset";
     }
 
+    let normalized = data.map(normalizeRecord).filter((row) => matchesClientSide(row, snap));
+
     setRecords(normalized);
-    setSourceUsed("Issued Construction Permits dataset");
+    setSourceUsed(sourceLabel);
     setSelectedRecord(normalized[0] || null);
 
     const titleBits = [snap.permit, snap.address, snap.contractor].filter(Boolean);
@@ -427,6 +447,7 @@ async function runSearch(activeSnapshot) {
       createdAt: new Date().toLocaleString(),
       snapshot: snap,
     };
+
     saveRecentSearch(entry);
     setRecentSearches(loadRecentSearches());
   } catch (err) {

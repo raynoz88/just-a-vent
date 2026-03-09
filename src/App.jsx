@@ -1,828 +1,1052 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  AlertCircle,
+  Search,
   Building2,
-  Check,
-  Clock3,
-  Copy,
-  Download,
+  UserRound,
+  ShieldCheck,
   ExternalLink,
   FileSearch,
+  AlertCircle,
+  Download,
   Filter,
-  LayoutGrid,
-  MapPin,
   RefreshCw,
-  Search,
-  ShieldCheck,
+  MapPin,
+  Clock3,
   Star,
-  Tags,
-  UserRound,
   Wrench,
-} from 'lucide-react'
+  Copy,
+  Check,
+  Tags,
+  LayoutGrid,
+} from "lucide-react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 
-const issuedPermitsEndpoint = 'https://data.austintexas.gov/resource/3syk-w9eu.json'
-const buildingPermitsEndpoint = 'https://data.austintexas.gov/resource/3z4i-4ta5.json'
+const issuedPermitsEndpoint = "https://data.austintexas.gov/resource/3syk-w9eu.json";
+const buildingPermitsEndpoint = "https://data.austintexas.gov/resource/3z4i-4ta5.json";
 
 function escapeSoql(value) {
-  return value.replace(/'/g, "''")
-}
-
-function buildSocrataUrl(base, { permit, address, contractor, limit = 100 }) {
-  const filters = []
-
-  if (permit?.trim()) {
-    filters.push(`upper(permit_num) like upper('%${escapeSoql(permit.trim())}%')`)
-  }
-
-  if (address?.trim()) {
-    filters.push(`upper(issued_address) like upper('%${escapeSoql(address.trim())}%')`)
-  }
-
-  if (contractor?.trim()) {
-    filters.push(`upper(contractor_company) like upper('%${escapeSoql(contractor.trim())}%')`)
-  }
-
-  const where = filters.length ? `$where=${encodeURIComponent(filters.join(' AND '))}` : ''
-  const select = `$limit=${limit}&$order=issued_date DESC`
-  return `${base}?${[where, select].filter(Boolean).join('&')}`
+  return String(value || "").replace(/'/g, "''");
 }
 
 function formatDate(value) {
-  if (!value) return '—'
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleDateString()
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString();
+}
+
+function buildSocrataUrl(base, { permit, address, contractor, limit = 100 }) {
+  const filters = [];
+
+  if (permit?.trim()) {
+    filters.push(`upper(permit_num) like upper('%${escapeSoql(permit.trim())}%')`);
+  }
+
+  if (address?.trim()) {
+    filters.push(`upper(issued_address) like upper('%${escapeSoql(address.trim())}%')`);
+  }
+
+  const where = filters.length ? `$where=${encodeURIComponent(filters.join(" AND "))}` : "";
+  const search = contractor?.trim() ? `$q=${encodeURIComponent(contractor.trim())}` : "";
+  const select = `$limit=${limit}&$order=issued_date DESC`;
+
+  return `${base}?${[where, search, select].filter(Boolean).join("&")}`;
 }
 
 function normalizeRecord(item) {
   return {
-    permitNumber: item.permit_num || item.permit_number || 'Permit',
-    status: item.status || item.permit_status || 'Unknown',
-    address: item.issued_address || item.original_address1 || item.address || 'Address unavailable',
-    issuedDate: item.issued_date || '',
+    permitNumber: item.permit_num || item.permit_number || "Permit",
+    status: item.status || item.permit_status || "Unknown",
+    address: item.issued_address || item.original_address1 || item.address || "Address unavailable",
+    issuedDate: item.issued_date || "",
     issuedDateLabel: formatDate(item.issued_date),
-    permitType: item.permit_type_desc || item.permit_type || '—',
-    workClass: item.work_class || item.class || '—',
-    contractor: item.contractor_company || item.contractor_name || '—',
-    valuation: item.total_valuation || '',
-  }
+    permitType: item.permit_type_desc || item.permit_type || "—",
+    workClass: item.work_class || item.class || "—",
+    contractor: item.contractor_company || item.contractor_name || "—",
+    valuation: item.total_valuation || "",
+    raw: item,
+  };
 }
 
 function uniqueValues(records, key) {
-  const set = new Set(records.map((r) => r[key]).filter(Boolean))
-  return [...set].sort((a, b) => String(a).localeCompare(String(b)))
+  const set = new Set(records.map((r) => r[key]).filter(Boolean));
+  return [...set].sort((a, b) => String(a).localeCompare(String(b)));
 }
 
 function toCsv(rows) {
-  const headers = ['Permit Number', 'Status', 'Address', 'Issued Date', 'Permit Type', 'Work Class', 'Contractor', 'Valuation']
-  const csvRows = rows.map((r) => [r.permitNumber, r.status, r.address, r.issuedDateLabel, r.permitType, r.workClass, r.contractor, r.valuation])
-  const encode = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`
-  return [headers, ...csvRows].map((row) => row.map(encode).join(',')).join('\n')
+  const headers = [
+    "Permit Number",
+    "Status",
+    "Address",
+    "Issued Date",
+    "Permit Type",
+    "Work Class",
+    "Contractor",
+    "Valuation",
+  ];
+
+  const csvRows = rows.map((r) => [
+    r.permitNumber,
+    r.status,
+    r.address,
+    r.issuedDateLabel,
+    r.permitType,
+    r.workClass,
+    r.contractor,
+    r.valuation,
+  ]);
+
+  const encode = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  return [headers, ...csvRows].map((row) => row.map(encode).join(",")).join("\n");
 }
 
 function downloadCsv(filename, content) {
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.setAttribute('download', filename)
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 function slugify(value) {
-  return String(value || '')
+  return String(value || "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 80)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
 }
 
 function buildMapUrl(address) {
-  if (!address) return 'https://www.google.com/maps'
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${address}, Austin, TX`)}`
+  if (!address) return "https://www.google.com/maps";
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address + ", Austin, TX")}`;
 }
 
-function storageGet(key, fallback) {
+function storageGet(key, fallback = []) {
   try {
-    return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback))
+    return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback));
   } catch {
-    return fallback
+    return fallback;
   }
 }
 
 function storageSet(key, value) {
-  localStorage.setItem(key, JSON.stringify(value))
-}
-
-function loadRecentSearches() {
-  return storageGet('austin-permit-recent-searches', [])
+  localStorage.setItem(key, JSON.stringify(value));
 }
 
 function saveRecentSearch(entry) {
-  const existing = loadRecentSearches()
-  storageSet('austin-permit-recent-searches', [entry, ...existing.filter((x) => x.id !== entry.id)].slice(0, 8))
+  const key = "austin-permit-recent-searches";
+  const existing = storageGet(key, []);
+  const normalized = [entry, ...existing.filter((x) => x.id !== entry.id)].slice(0, 8);
+  storageSet(key, normalized);
 }
 
-function loadSavedSearches() {
-  return storageGet('austin-permit-saved-searches', [])
+function loadRecentSearches() {
+  return storageGet("austin-permit-recent-searches", []);
 }
 
 function saveSavedSearch(entry) {
-  const existing = loadSavedSearches()
-  storageSet('austin-permit-saved-searches', [entry, ...existing.filter((x) => x.id !== entry.id)].slice(0, 20))
+  const key = "austin-permit-saved-searches";
+  const existing = storageGet(key, []);
+  const normalized = [entry, ...existing.filter((x) => x.id !== entry.id)].slice(0, 20);
+  storageSet(key, normalized);
+}
+
+function loadSavedSearches() {
+  return storageGet("austin-permit-saved-searches", []);
 }
 
 function removeSavedSearch(id) {
-  const existing = loadSavedSearches()
-  storageSet('austin-permit-saved-searches', existing.filter((x) => x.id !== id))
+  const key = "austin-permit-saved-searches";
+  const existing = storageGet(key, []);
+  storageSet(key, existing.filter((x) => x.id !== id));
 }
 
 function loadPermitMeta() {
-  return storageGet('austin-permit-meta', {})
+  return storageGet("austin-permit-meta", {});
 }
 
 function savePermitMeta(meta) {
-  storageSet('austin-permit-meta', meta)
+  storageSet("austin-permit-meta", meta);
 }
 
 function permitKey(record) {
-  return `${record?.permitNumber || ''}__${record?.address || ''}`
-}
-
-function cx(...parts) {
-  return parts.filter(Boolean).join(' ')
-}
-
-function AppShell({ children }) {
-  return <div style={{ minHeight: '100vh', background: '#f8fafc' }}>{children}</div>
-}
-
-function SectionCard({ title, description, children, sticky = false }) {
-  return (
-    <div
-      style={{
-        background: '#fff',
-        border: '1px solid #e2e8f0',
-        borderRadius: 20,
-        boxShadow: '0 1px 3px rgba(15,23,42,.08)',
-        position: sticky ? 'sticky' : 'static',
-        top: sticky ? 24 : undefined,
-      }}
-    >
-      {(title || description) && (
-        <div style={{ padding: '20px 20px 8px 20px' }}>
-          {title && <div style={{ fontSize: 22, fontWeight: 600 }}>{title}</div>}
-          {description && <div style={{ fontSize: 14, color: '#64748b', marginTop: 6 }}>{description}</div>}
-        </div>
-      )}
-      <div style={{ padding: 20 }}>{children}</div>
-    </div>
-  )
-}
-
-function SmallCard({ label, value }) {
-  return (
-    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 18, padding: 16 }}>
-      <div style={{ fontSize: 14, color: '#64748b' }}>{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 700, marginTop: 4 }}>{value}</div>
-    </div>
-  )
-}
-
-function Pill({ children, muted = false }) {
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        padding: '6px 10px',
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 600,
-        background: muted ? '#fff' : '#eef2ff',
-        color: muted ? '#334155' : '#334155',
-        border: '1px solid #cbd5e1',
-      }}
-    >
-      {children}
-    </span>
-  )
-}
-
-function ActionButton({ icon: Icon, children, href, onClick, disabled = false, secondary = false, small = false }) {
-  const style = {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 8,
-    borderRadius: 16,
-    padding: small ? '8px 12px' : '10px 14px',
-    border: secondary ? '1px solid #cbd5e1' : '1px solid #0f172a',
-    background: secondary ? '#fff' : '#0f172a',
-    color: secondary ? '#0f172a' : '#fff',
-    fontWeight: 600,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    opacity: disabled ? 0.55 : 1,
-    textDecoration: 'none',
-  }
-
-  const content = (
-    <>
-      {Icon ? <Icon size={16} /> : null}
-      <span>{children}</span>
-    </>
-  )
-
-  if (href) {
-    return (
-      <a href={href} target="_blank" rel="noreferrer" style={style}>
-        {content}
-      </a>
-    )
-  }
-
-  return (
-    <button type="button" onClick={onClick} disabled={disabled} style={style}>
-      {content}
-    </button>
-  )
-}
-
-function Field({ label, children }) {
-  return (
-    <label style={{ display: 'block' }}>
-      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{label}</div>
-      {children}
-    </label>
-  )
-}
-
-function TextInput(props) {
-  return <input {...props} style={{ width: '100%', padding: '12px 14px', borderRadius: 14, border: '1px solid #cbd5e1', background: '#fff' }} />
-}
-
-function TextArea(props) {
-  return <textarea {...props} style={{ width: '100%', padding: '12px 14px', borderRadius: 14, border: '1px solid #cbd5e1', background: '#fff', minHeight: 120, resize: 'vertical' }} />
-}
-
-function SelectBox({ value, onChange, options }) {
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} style={{ width: '100%', padding: '12px 14px', borderRadius: 14, border: '1px solid #cbd5e1', background: '#fff' }}>
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  )
-}
-
-function Divider() {
-  return <div style={{ height: 1, background: '#e2e8f0', margin: '16px 0' }} />
-}
-
-function SearchChip({ icon: Icon, title, subtitle, actions }) {
-  return (
-    <div style={{ border: '1px solid #e2e8f0', borderRadius: 18, padding: 16, background: '#fff' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <div style={{ background: '#f1f5f9', borderRadius: 12, padding: 10 }}>{Icon ? <Icon size={16} /> : null}</div>
-          <div>
-            <div style={{ fontWeight: 600 }}>{title}</div>
-            <div style={{ marginTop: 4, fontSize: 14, color: '#64748b' }}>{subtitle}</div>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{actions}</div>
-      </div>
-    </div>
-  )
-}
-
-function CopyButton({ value, label = 'Copy', copyState, setCopyState }) {
-  async function handleCopy() {
-    if (!value) return
-    try {
-      await navigator.clipboard.writeText(String(value))
-      setCopyState(String(value))
-      window.setTimeout(() => setCopyState(''), 1500)
-    } catch {}
-  }
-
-  const copied = copyState === String(value)
-  return <ActionButton icon={copied ? Check : Copy} secondary small onClick={handleCopy}>{copied ? 'Copied' : label}</ActionButton>
+  return `${record?.permitNumber || ""}__${record?.address || ""}`;
 }
 
 function StatRow({ label, value, action }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
-      <div style={{ fontSize: 14, color: '#64748b' }}>{label}</div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-        <div style={{ fontWeight: 600, textAlign: 'right' }}>{value || '—'}</div>
+    <div className="flex items-start justify-between gap-4 text-sm">
+      <span className="text-slate-500">{label}</span>
+      <div className="flex items-center gap-2 text-right font-medium text-slate-800">
+        <span>{value || "—"}</span>
         {action}
       </div>
     </div>
-  )
+  );
 }
 
-function Tabs({ current, setCurrent }) {
-  const tabs = [
-    ['lookup', 'Permit Lookup'],
-    ['dashboard', 'Contractor Dashboard'],
-    ['contractors', 'Contractors'],
-    ['resources', 'Resources'],
-  ]
+function SearchChip({ icon, title, subtitle, actions }) {
   return (
-    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-      {tabs.map(([value, label]) => (
-        <button
-          key={value}
-          type="button"
-          onClick={() => setCurrent(value)}
-          style={{
-            padding: '10px 14px',
-            borderRadius: 16,
-            border: '1px solid #cbd5e1',
-            background: current === value ? '#0f172a' : '#fff',
-            color: current === value ? '#fff' : '#0f172a',
-            fontWeight: 600,
-            cursor: 'pointer',
-          }}
-        >
-          {label}
-        </button>
-      ))}
+    <div className="rounded-2xl border bg-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 rounded-xl bg-slate-100 p-2">{icon}</div>
+          <div>
+            <div className="font-medium text-slate-900">{title}</div>
+            <div className="mt-1 text-sm text-slate-500">{subtitle}</div>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">{actions}</div>
+      </div>
     </div>
-  )
+  );
 }
 
-export default function App() {
-  const [tab, setTab] = useState('lookup')
-  const [permit, setPermit] = useState('')
-  const [address, setAddress] = useState('')
-  const [contractor, setContractor] = useState('')
-  const [records, setRecords] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [sourceUsed, setSourceUsed] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [typeFilter, setTypeFilter] = useState('all')
-  const [sortBy, setSortBy] = useState('issued_desc')
-  const [selectedRecord, setSelectedRecord] = useState(null)
-  const [recentSearches, setRecentSearches] = useState([])
-  const [savedSearches, setSavedSearches] = useState([])
-  const [addressSuggestions, setAddressSuggestions] = useState([])
-  const [permitMeta, setPermitMeta] = useState({})
-  const [copyState, setCopyState] = useState('')
-  const [contractorViewSort, setContractorViewSort] = useState('permits_desc')
+function CopyButton({ value, copyState, setCopyState, label = "Copy" }) {
+  async function handleCopy() {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(String(value));
+      setCopyState(String(value));
+      window.setTimeout(() => setCopyState(""), 1500);
+    } catch {
+      setCopyState("");
+    }
+  }
+
+  const copied = copyState === String(value);
+
+  return (
+    <Button variant="outline" size="sm" className="rounded-xl" onClick={handleCopy}>
+      {copied ? <Check className="mr-2 h-4 w-4" /> : <Copy className="mr-2 h-4 w-4" />}
+      {copied ? "Copied" : label}
+    </Button>
+  );
+}
+
+export default function AustinPermitContractorApp() {
+  const [permit, setPermit] = useState("");
+  const [address, setAddress] = useState("");
+  const [contractor, setContractor] = useState("");
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [sourceUsed, setSourceUsed] = useState("");
+
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("issued_desc");
+  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [recentSearches, setRecentSearches] = useState([]);
+  const [savedSearches, setSavedSearches] = useState([]);
+  const [addressSuggestions, setAddressSuggestions] = useState([]);
+  const [permitMeta, setPermitMeta] = useState({});
+  const [copyState, setCopyState] = useState("");
+  const [contractorViewSort, setContractorViewSort] = useState("permits_desc");
 
   useEffect(() => {
-    setRecentSearches(loadRecentSearches())
-    setSavedSearches(loadSavedSearches())
-    setPermitMeta(loadPermitMeta())
-  }, [])
+    setRecentSearches(loadRecentSearches());
+    setSavedSearches(loadSavedSearches());
+    setPermitMeta(loadPermitMeta());
+  }, []);
 
   useEffect(() => {
     if (!address.trim()) {
-      setAddressSuggestions([])
-      return
+      setAddressSuggestions([]);
+      return;
     }
-    const unique = [...new Set(records.map((r) => r.address).filter((a) => a && a.toLowerCase().includes(address.toLowerCase())))].slice(0, 6)
-    setAddressSuggestions(unique)
-  }, [address, records])
+    const unique = [...new Set(records.map((r) => r.address).filter((a) => a && a.toLowerCase().includes(address.toLowerCase())))]
+      .slice(0, 6);
+    setAddressSuggestions(unique);
+  }, [address, records]);
 
   function snapshotSearch() {
-    return { permit, address, contractor, statusFilter, typeFilter, sortBy }
+    return {
+      permit,
+      address,
+      contractor,
+      statusFilter,
+      typeFilter,
+      sortBy,
+    };
   }
 
   function applySearchSnapshot(snapshot) {
-    setPermit(snapshot.permit || '')
-    setAddress(snapshot.address || '')
-    setContractor(snapshot.contractor || '')
-    setStatusFilter(snapshot.statusFilter || 'all')
-    setTypeFilter(snapshot.typeFilter || 'all')
-    setSortBy(snapshot.sortBy || 'issued_desc')
+    setPermit(snapshot.permit || "");
+    setAddress(snapshot.address || "");
+    setContractor(snapshot.contractor || "");
+    setStatusFilter(snapshot.statusFilter || "all");
+    setTypeFilter(snapshot.typeFilter || "all");
+    setSortBy(snapshot.sortBy || "issued_desc");
   }
 
   async function runSearch(activeSnapshot) {
-    const snap = activeSnapshot || snapshotSearch()
-    setLoading(true)
-    setError('')
-    setRecords([])
-    setSourceUsed('')
-    setSelectedRecord(null)
+    const snap = activeSnapshot || snapshotSearch();
+    setLoading(true);
+    setError("");
+    setRecords([]);
+    setSourceUsed("");
+    setSelectedRecord(null);
 
-    try {
-      let res = await fetch(buildSocrataUrl(issuedPermitsEndpoint, { ...snap, limit: 100 }))
-      if (!res.ok) throw new Error('Primary dataset lookup failed.')
-      let data = await res.json()
+    async function attemptFetch(url, sourceLabel) {
+      const res = await fetch(url, { headers: { Accept: "application/json" } });
 
-      if (Array.isArray(data) && data.length > 0) {
-        const normalized = data.map(normalizeRecord)
-        setRecords(normalized)
-        setSourceUsed('Issued Construction Permits dataset')
-        setSelectedRecord(normalized[0] || null)
-      } else {
-        res = await fetch(buildSocrataUrl(buildingPermitsEndpoint, { ...snap, limit: 100 }))
-        if (!res.ok) throw new Error('Backup dataset lookup failed.')
-        data = await res.json()
-        const normalized = Array.isArray(data) ? data.map(normalizeRecord) : []
-        setRecords(normalized)
-        setSourceUsed('Building Permits dataset')
-        setSelectedRecord(normalized[0] || null)
+      if (!res.ok) {
+        let details = "";
+        try {
+          details = await res.text();
+        } catch {
+          details = "";
+        }
+        throw new Error(`${sourceLabel} failed (${res.status})${details ? `: ${details.slice(0, 180)}` : ""}`);
       }
 
-      const titleBits = [snap.permit, snap.address, snap.contractor].filter(Boolean)
-      const label = titleBits.length ? titleBits.join(' • ') : 'Permit search'
-      saveRecentSearch({ id: `${slugify(label)}-${Date.now()}`, label, createdAt: new Date().toLocaleString(), snapshot: snap })
-      setRecentSearches(loadRecentSearches())
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    }
+
+    try {
+      let primaryError = "";
+      let data = [];
+
+      try {
+        data = await attemptFetch(
+          buildSocrataUrl(issuedPermitsEndpoint, { ...snap, limit: 100 }),
+          "Primary dataset lookup"
+        );
+      } catch (err) {
+        primaryError = err?.message || "Primary dataset lookup failed.";
+      }
+
+      if (data.length > 0) {
+        const normalized = data.map(normalizeRecord).filter((row) => {
+          if (!snap.contractor?.trim()) return true;
+          return row.contractor.toLowerCase().includes(snap.contractor.trim().toLowerCase());
+        });
+        setRecords(normalized);
+        setSourceUsed("Issued Construction Permits dataset");
+        setSelectedRecord(normalized[0] || null);
+      } else {
+        const backupData = await attemptFetch(
+          buildSocrataUrl(buildingPermitsEndpoint, { ...snap, limit: 100 }),
+          "Backup dataset lookup"
+        );
+        const normalized = backupData.map(normalizeRecord).filter((row) => {
+          if (!snap.contractor?.trim()) return true;
+          return row.contractor.toLowerCase().includes(snap.contractor.trim().toLowerCase());
+        });
+        setRecords(normalized);
+        setSourceUsed("Building Permits dataset");
+        setSelectedRecord(normalized[0] || null);
+
+        if (!normalized.length && primaryError) {
+          setError(`${primaryError} Backup dataset returned no matching results.`);
+        }
+      }
+
+      const titleBits = [snap.permit, snap.address, snap.contractor].filter(Boolean);
+      const label = titleBits.length ? titleBits.join(" • ") : "Permit search";
+      const entry = {
+        id: `${slugify(label)}-${Date.now()}`,
+        label,
+        createdAt: new Date().toLocaleString(),
+        snapshot: snap,
+      };
+      saveRecentSearch(entry);
+      setRecentSearches(loadRecentSearches());
     } catch (err) {
-      setError(err?.message || 'Unable to fetch permit data.')
+      setError(err?.message || "Unable to fetch permit data.");
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
   function resetFilters() {
-    setStatusFilter('all')
-    setTypeFilter('all')
-    setSortBy('issued_desc')
-  }
-
-  function clearSearch() {
-    setPermit('')
-    setAddress('')
-    setContractor('')
-    setRecords([])
-    setError('')
-    setSourceUsed('')
-    setSelectedRecord(null)
-    resetFilters()
+    setStatusFilter("all");
+    setTypeFilter("all");
+    setSortBy("issued_desc");
   }
 
   function saveCurrentSearch() {
-    const snap = snapshotSearch()
-    const titleBits = [snap.permit, snap.address, snap.contractor].filter(Boolean)
-    const label = titleBits.length ? titleBits.join(' • ') : 'Permit search'
-    saveSavedSearch({ id: `${slugify(label)}-${Date.now()}`, label, createdAt: new Date().toLocaleString(), snapshot: snap })
-    setSavedSearches(loadSavedSearches())
+    const snap = snapshotSearch();
+    const titleBits = [snap.permit, snap.address, snap.contractor].filter(Boolean);
+    const label = titleBits.length ? titleBits.join(" • ") : "Permit search";
+    const entry = {
+      id: `${slugify(label)}-${Date.now()}`,
+      label,
+      createdAt: new Date().toLocaleString(),
+      snapshot: snap,
+    };
+    saveSavedSearch(entry);
+    setSavedSearches(loadSavedSearches());
   }
 
   function updateSelectedMeta(partial) {
-    if (!selectedRecord) return
-    const key = permitKey(selectedRecord)
-    const next = { ...permitMeta, [key]: { ...(permitMeta[key] || { tags: '', notes: '' }), ...partial } }
-    setPermitMeta(next)
-    savePermitMeta(next)
+    if (!selectedRecord) return;
+    const key = permitKey(selectedRecord);
+    const next = {
+      ...permitMeta,
+      [key]: {
+        ...(permitMeta[key] || { tags: "", notes: "" }),
+        ...partial,
+      },
+    };
+    setPermitMeta(next);
+    savePermitMeta(next);
   }
 
-  const statusOptions = useMemo(() => uniqueValues(records, 'status'), [records])
-  const typeOptions = useMemo(() => uniqueValues(records, 'permitType'), [records])
+  const statusOptions = useMemo(() => uniqueValues(records, "status"), [records]);
+  const typeOptions = useMemo(() => uniqueValues(records, "permitType"), [records]);
 
   const filteredRecords = useMemo(() => {
-    let next = [...records]
-    if (statusFilter !== 'all') next = next.filter((r) => r.status === statusFilter)
-    if (typeFilter !== 'all') next = next.filter((r) => r.permitType === typeFilter)
+    let next = [...records];
+
+    if (statusFilter !== "all") {
+      next = next.filter((r) => r.status === statusFilter);
+    }
+    if (typeFilter !== "all") {
+      next = next.filter((r) => r.permitType === typeFilter);
+    }
 
     next.sort((a, b) => {
       switch (sortBy) {
-        case 'issued_asc':
-          return new Date(a.issuedDate || 0).getTime() - new Date(b.issuedDate || 0).getTime()
-        case 'permit_asc':
-          return a.permitNumber.localeCompare(b.permitNumber)
-        case 'permit_desc':
-          return b.permitNumber.localeCompare(a.permitNumber)
+        case "issued_asc":
+          return new Date(a.issuedDate || 0).getTime() - new Date(b.issuedDate || 0).getTime();
+        case "permit_asc":
+          return a.permitNumber.localeCompare(b.permitNumber);
+        case "permit_desc":
+          return b.permitNumber.localeCompare(a.permitNumber);
+        case "issued_desc":
         default:
-          return new Date(b.issuedDate || 0).getTime() - new Date(a.issuedDate || 0).getTime()
+          return new Date(b.issuedDate || 0).getTime() - new Date(a.issuedDate || 0).getTime();
       }
-    })
-    return next
-  }, [records, statusFilter, typeFilter, sortBy])
+    });
+
+    return next;
+  }, [records, statusFilter, typeFilter, sortBy]);
 
   useEffect(() => {
     if (!filteredRecords.length) {
-      setSelectedRecord(null)
-      return
+      setSelectedRecord(null);
+      return;
     }
-    const stillExists = filteredRecords.find((r) => r.permitNumber === selectedRecord?.permitNumber && r.address === selectedRecord?.address)
-    setSelectedRecord(stillExists || filteredRecords[0])
-  }, [filteredRecords])
+    const stillExists = filteredRecords.find(
+      (r) => r.permitNumber === selectedRecord?.permitNumber && r.address === selectedRecord?.address
+    );
+    setSelectedRecord(stillExists || filteredRecords[0]);
+  }, [filteredRecords]);
 
-  const totalValuation = useMemo(() => filteredRecords.reduce((sum, r) => sum + (Number(r.valuation) || 0), 0), [filteredRecords])
+  const totalValuation = useMemo(() => {
+    return filteredRecords.reduce((sum, r) => sum + (Number(r.valuation) || 0), 0);
+  }, [filteredRecords]);
 
   const contractorSummary = useMemo(() => {
-    if (!filteredRecords.length) return null
+    if (!filteredRecords.length) return null;
     const contractorCounts = filteredRecords.reduce((acc, row) => {
-      const key = row.contractor || 'Unknown'
-      acc[key] = (acc[key] || 0) + 1
-      return acc
-    }, {})
-    const topContractor = Object.entries(contractorCounts).sort((a, b) => b[1] - a[1])[0]
-    return { uniqueContractors: Object.keys(contractorCounts).length, topContractor: topContractor?.[0] || '—', topCount: topContractor?.[1] || 0 }
-  }, [filteredRecords])
+      const key = row.contractor || "Unknown";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    const topContractor = Object.entries(contractorCounts).sort((a, b) => b[1] - a[1])[0];
+    return {
+      uniqueContractors: Object.keys(contractorCounts).length,
+      topContractor: topContractor?.[0] || "—",
+      topCount: topContractor?.[1] || 0,
+    };
+  }, [filteredRecords]);
 
   const contractorDashboard = useMemo(() => {
     const grouped = filteredRecords.reduce((acc, row) => {
-      const key = row.contractor || 'Unknown'
+      const key = row.contractor || "Unknown";
       if (!acc[key]) {
-        acc[key] = { contractor: key, permitCount: 0, totalValuation: 0, addresses: new Set(), latestIssuedDate: '', latestIssuedLabel: '—' }
+        acc[key] = {
+          contractor: key,
+          permitCount: 0,
+          totalValuation: 0,
+          addresses: new Set(),
+          latestIssuedDate: "",
+          latestIssuedLabel: "—",
+        };
       }
-      acc[key].permitCount += 1
-      acc[key].totalValuation += Number(row.valuation) || 0
-      if (row.address) acc[key].addresses.add(row.address)
-      if (!acc[key].latestIssuedDate || new Date(row.issuedDate).getTime() > new Date(acc[key].latestIssuedDate).getTime()) {
-        acc[key].latestIssuedDate = row.issuedDate
-        acc[key].latestIssuedLabel = row.issuedDateLabel
+      acc[key].permitCount += 1;
+      acc[key].totalValuation += Number(row.valuation) || 0;
+      if (row.address) acc[key].addresses.add(row.address);
+      if (
+        !acc[key].latestIssuedDate ||
+        new Date(row.issuedDate).getTime() > new Date(acc[key].latestIssuedDate).getTime()
+      ) {
+        acc[key].latestIssuedDate = row.issuedDate;
+        acc[key].latestIssuedLabel = row.issuedDateLabel;
       }
-      return acc
-    }, {})
+      return acc;
+    }, {});
 
-    const rows = Object.values(grouped).map((row) => ({ ...row, uniqueAddresses: row.addresses.size }))
+    const rows = Object.values(grouped).map((row) => ({
+      ...row,
+      uniqueAddresses: row.addresses.size,
+    }));
+
     rows.sort((a, b) => {
       switch (contractorViewSort) {
-        case 'valuation_desc':
-          return b.totalValuation - a.totalValuation
-        case 'name_asc':
-          return a.contractor.localeCompare(b.contractor)
+        case "valuation_desc":
+          return b.totalValuation - a.totalValuation;
+        case "name_asc":
+          return a.contractor.localeCompare(b.contractor);
+        case "permits_desc":
         default:
-          return b.permitCount - a.permitCount
+          return b.permitCount - a.permitCount;
       }
-    })
-    return rows
-  }, [filteredRecords, contractorViewSort])
+    });
 
-  const selectedMeta = selectedRecord ? permitMeta[permitKey(selectedRecord)] || { tags: '', notes: '' } : { tags: '', notes: '' }
+    return rows;
+  }, [filteredRecords, contractorViewSort]);
 
-  const statusSelectOptions = [{ value: 'all', label: 'All statuses' }, ...statusOptions.map((v) => ({ value: v, label: v }))]
-  const typeSelectOptions = [{ value: 'all', label: 'All permit types' }, ...typeOptions.map((v) => ({ value: v, label: v }))]
+  const selectedMeta = selectedRecord
+    ? permitMeta[permitKey(selectedRecord)] || { tags: "", notes: "" }
+    : { tags: "", notes: "" };
+
+  const publicSearchLink = "https://abc.austintexas.gov/web/permit/public-search-other";
+  const contractorRegistrationLink = "https://www.austintexas.gov/page/contractor-registration";
+  const openDataLink = "https://data.austintexas.gov/";
 
   return (
-    <AppShell>
-      <div style={{ maxWidth: 1320, margin: '0 auto', padding: 24 }}>
-        <div style={{ display: 'grid', gap: 24 }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <Building2 size={24} />
-              <h1 style={{ margin: 0, fontSize: 34 }}>Austin Permit & Contractor Lookup</h1>
-            </div>
-            <p style={{ color: '#64748b', maxWidth: 860, marginTop: 10 }}>
-              Search City of Austin permit information by permit number, project address, or contractor company. This Vercel-ready version includes notes, tags, copy tools, saved searches, quick map access, and a contractor dashboard.
-            </p>
+    <div className="min-h-screen bg-slate-50 p-6 md:p-10">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Building2 className="h-6 w-6" />
+            <h1 className="text-3xl font-semibold tracking-tight">Austin Permit & Contractor Lookup</h1>
           </div>
+          <p className="max-w-4xl text-sm text-slate-600">
+            Search City of Austin permit information by permit number, project address, or contractor company.
+          </p>
+        </div>
 
-          <SectionCard>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', color: '#334155', fontWeight: 600 }}>
-              <ShieldCheck size={18} />
-              <span>Public-data-first workflow</span>
-            </div>
-            <div style={{ marginTop: 8, color: '#64748b', fontSize: 14 }}>
-              This app is built around public City data and the official AB+C Public Search page. It avoids fragile account scraping and is suited for regular field use.
-            </div>
-          </SectionCard>
+        <Alert>
+          <ShieldCheck className="h-4 w-4" />
+          <AlertTitle>Public-data-first workflow</AlertTitle>
+          <AlertDescription>
+            This app is built around public City data and the official AB+C Public Search page.
+          </AlertDescription>
+        </Alert>
 
-          <Tabs current={tab} setCurrent={setTab} />
+        <Tabs defaultValue="lookup" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-4 md:w-[940px]">
+            <TabsTrigger value="lookup">Permit Lookup</TabsTrigger>
+            <TabsTrigger value="dashboard">Contractor Dashboard</TabsTrigger>
+            <TabsTrigger value="contractors">Contractors</TabsTrigger>
+            <TabsTrigger value="resources">Resources</TabsTrigger>
+          </TabsList>
 
-          {tab === 'lookup' && (
-            <div style={{ display: 'grid', gap: 24 }}>
-              <SectionCard title="Search permits" description="Run a broad lookup, then narrow results with filters below.">
-                <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))' }}>
-                  <Field label="Permit Number">
-                    <TextInput value={permit} onChange={(e) => setPermit(e.target.value)} placeholder="EX: 2024-123456 BP" />
-                  </Field>
-                  <Field label="Address">
-                    <TextInput value={address} onChange={(e) => setAddress(e.target.value)} placeholder="EX: 123 Main St" />
-                  </Field>
-                  <Field label="Contractor Company">
-                    <TextInput value={contractor} onChange={(e) => setContractor(e.target.value)} placeholder="EX: Texas Grand Plumbing" />
-                  </Field>
+          <TabsContent value="lookup" className="space-y-6">
+            <Card className="rounded-2xl shadow-sm">
+              <CardHeader>
+                <CardTitle>Search permits</CardTitle>
+                <CardDescription>Run a broad lookup, then narrow results with filters below.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Permit Number</label>
+                    <Input value={permit} onChange={(e) => setPermit(e.target.value)} placeholder="EX: 2024-123456 BP" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Address</label>
+                    <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="EX: 123 Main St" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Contractor Company</label>
+                    <Input value={contractor} onChange={(e) => setContractor(e.target.value)} placeholder="EX: Texas Grand Plumbing" />
+                  </div>
                 </div>
 
-                {addressSuggestions.length > 0 && (
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
+                {addressSuggestions.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
                     {addressSuggestions.map((suggestion) => (
-                      <ActionButton key={suggestion} icon={MapPin} secondary small onClick={() => setAddress(suggestion)}>{suggestion}</ActionButton>
+                      <Button key={suggestion} variant="outline" className="rounded-2xl" onClick={() => setAddress(suggestion)}>
+                        <MapPin className="mr-2 h-4 w-4" />
+                        {suggestion}
+                      </Button>
                     ))}
                   </div>
-                )}
+                ) : null}
 
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 16 }}>
-                  <ActionButton icon={Search} onClick={() => runSearch()} disabled={loading}>{loading ? 'Searching...' : 'Search Permits'}</ActionButton>
-                  <ActionButton icon={RefreshCw} secondary onClick={clearSearch}>Clear</ActionButton>
-                  <ActionButton icon={Download} secondary onClick={() => downloadCsv('austin-permit-results.csv', toCsv(filteredRecords))} disabled={!filteredRecords.length}>Export CSV</ActionButton>
-                  <ActionButton icon={Star} secondary onClick={saveCurrentSearch}>Save Search</ActionButton>
+                <div className="flex flex-wrap gap-3">
+                  <Button onClick={() => runSearch()} disabled={loading} className="rounded-2xl">
+                    <Search className="mr-2 h-4 w-4" />
+                    {loading ? "Searching..." : "Search Permits"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setPermit("");
+                      setAddress("");
+                      setContractor("");
+                      setRecords([]);
+                      setError("");
+                      setSourceUsed("");
+                      setSelectedRecord(null);
+                      resetFilters();
+                    }}
+                    className="rounded-2xl"
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Clear
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="rounded-2xl"
+                    onClick={() => downloadCsv("austin-permit-results.csv", toCsv(filteredRecords))}
+                    disabled={filteredRecords.length === 0}
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Export CSV
+                  </Button>
+                  <Button onClick={saveCurrentSearch} variant="outline" className="rounded-2xl">
+                    <Star className="mr-2 h-4 w-4" />
+                    Save Search
+                  </Button>
                 </div>
 
-                {error && (
-                  <div style={{ marginTop: 16, border: '1px solid #fecaca', background: '#fef2f2', color: '#991b1b', borderRadius: 16, padding: 14, display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <AlertCircle size={16} />
-                    <span>{error}</span>
+                {error ? (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Search error</AlertTitle>
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl shadow-sm">
+              <CardHeader>
+                <CardTitle>Filters and summary</CardTitle>
+                <CardDescription>Refine the result set without re-running the search.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Status</label>
+                    <Select value={statusFilter} onValueChange={setStatusFilter}>
+                      <SelectTrigger><SelectValue placeholder="All statuses" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All statuses</SelectItem>
+                        {statusOptions.map((value) => (
+                          <SelectItem key={value} value={value}>{value}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                )}
-              </SectionCard>
 
-              <SectionCard title="Filters and summary" description="Refine the result set without re-running the search.">
-                <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))' }}>
-                  <Field label="Status"><SelectBox value={statusFilter} onChange={setStatusFilter} options={statusSelectOptions} /></Field>
-                  <Field label="Permit Type"><SelectBox value={typeFilter} onChange={setTypeFilter} options={typeSelectOptions} /></Field>
-                  <Field label="Sort">
-                    <SelectBox
-                      value={sortBy}
-                      onChange={setSortBy}
-                      options={[
-                        { value: 'issued_desc', label: 'Issued date: newest first' },
-                        { value: 'issued_asc', label: 'Issued date: oldest first' },
-                        { value: 'permit_asc', label: 'Permit number: A–Z' },
-                        { value: 'permit_desc', label: 'Permit number: Z–A' },
-                      ]}
-                    />
-                  </Field>
-                  <div style={{ display: 'flex', alignItems: 'end' }}><ActionButton icon={Filter} secondary onClick={resetFilters}>Reset Filters</ActionButton></div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Permit Type</label>
+                    <Select value={typeFilter} onValueChange={setTypeFilter}>
+                      <SelectTrigger><SelectValue placeholder="All permit types" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All permit types</SelectItem>
+                        {typeOptions.map((value) => (
+                          <SelectItem key={value} value={value}>{value}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Sort</label>
+                    <Select value={sortBy} onValueChange={setSortBy}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="issued_desc">Issued date: newest first</SelectItem>
+                        <SelectItem value="issued_asc">Issued date: oldest first</SelectItem>
+                        <SelectItem value="permit_asc">Permit number: A–Z</SelectItem>
+                        <SelectItem value="permit_desc">Permit number: Z–A</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex items-end">
+                    <Button variant="outline" onClick={resetFilters} className="w-full rounded-2xl">
+                      <Filter className="mr-2 h-4 w-4" />
+                      Reset Filters
+                    </Button>
+                  </div>
                 </div>
 
-                <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', marginTop: 16 }}>
-                  <SmallCard label="Matching permits" value={filteredRecords.length} />
-                  <SmallCard label="Data source used" value={sourceUsed || '—'} />
-                  <SmallCard label="Total valuation shown" value={`$${totalValuation.toLocaleString()}`} />
-                  <SmallCard label="Unique contractors" value={contractorSummary?.uniqueContractors || 0} />
+                <div className="grid gap-4 md:grid-cols-4">
+                  <Card className="rounded-2xl border bg-white shadow-none">
+                    <CardContent className="p-4">
+                      <div className="text-sm text-slate-500">Matching permits</div>
+                      <div className="text-2xl font-semibold">{filteredRecords.length}</div>
+                    </CardContent>
+                  </Card>
+                  <Card className="rounded-2xl border bg-white shadow-none">
+                    <CardContent className="p-4">
+                      <div className="text-sm text-slate-500">Data source used</div>
+                      <div className="text-base font-medium">{sourceUsed || "—"}</div>
+                    </CardContent>
+                  </Card>
+                  <Card className="rounded-2xl border bg-white shadow-none">
+                    <CardContent className="p-4">
+                      <div className="text-sm text-slate-500">Total valuation shown</div>
+                      <div className="text-2xl font-semibold">${totalValuation.toLocaleString()}</div>
+                    </CardContent>
+                  </Card>
+                  <Card className="rounded-2xl border bg-white shadow-none">
+                    <CardContent className="p-4">
+                      <div className="text-sm text-slate-500">Unique contractors</div>
+                      <div className="text-2xl font-semibold">{contractorSummary?.uniqueContractors || 0}</div>
+                    </CardContent>
+                  </Card>
                 </div>
-              </SectionCard>
+              </CardContent>
+            </Card>
 
-              <div style={{ display: 'grid', gap: 24, gridTemplateColumns: 'minmax(0,1.2fr) minmax(320px,.8fr)' }}>
-                <div style={{ display: 'grid', gap: 16 }}>
-                  {!filteredRecords.length && !loading && (
-                    <SectionCard>
-                      <div style={{ color: '#64748b' }}>No results yet. Run a search to view matching permits.</div>
-                    </SectionCard>
-                  )}
+            <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+              <div className="grid gap-4">
+                {filteredRecords.length === 0 && !loading ? (
+                  <Card className="rounded-2xl shadow-sm">
+                    <CardContent className="flex min-h-[120px] items-center justify-center text-sm text-slate-500">
+                      No results yet. Run a search to view matching permits.
+                    </CardContent>
+                  </Card>
+                ) : null}
 
-                  {filteredRecords.map((item, idx) => {
-                    const meta = permitMeta[permitKey(item)] || { tags: '', notes: '' }
-                    return (
-                      <div key={`${item.permitNumber}-${idx}`} style={{ border: selectedRecord?.permitNumber === item.permitNumber && selectedRecord?.address === item.address ? '2px solid #94a3b8' : '1px solid #e2e8f0', borderRadius: 20, background: '#fff', boxShadow: '0 1px 3px rgba(15,23,42,.08)' }}>
-                        <div style={{ padding: 20, display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-                          <div style={{ display: 'grid', gap: 10 }}>
-                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                              <div style={{ fontSize: 22, fontWeight: 700 }}>{item.permitNumber}</div>
-                              <Pill>{item.status}</Pill>
-                              {meta.tags ? <Pill muted>{meta.tags}</Pill> : null}
+                {filteredRecords.map((item, idx) => {
+                  const meta = permitMeta[permitKey(item)] || { tags: "", notes: "" };
+                  return (
+                    <Card
+                      key={`${item.permitNumber}-${idx}`}
+                      className={`rounded-2xl shadow-sm transition ${selectedRecord?.permitNumber === item.permitNumber && selectedRecord?.address === item.address ? "ring-2 ring-slate-300" : ""}`}
+                    >
+                      <CardContent className="p-5">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-lg font-semibold">{item.permitNumber}</h3>
+                              <Badge variant="secondary">{item.status}</Badge>
+                              {meta.tags ? <Badge variant="outline">{meta.tags}</Badge> : null}
                             </div>
-                            <div style={{ color: '#334155' }}>{item.address}</div>
-                            <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', color: '#64748b', fontSize: 14 }}>
-                              <div><strong style={{ color: '#0f172a' }}>Issued:</strong> {item.issuedDateLabel}</div>
-                              <div><strong style={{ color: '#0f172a' }}>Type:</strong> {item.permitType}</div>
-                              <div><strong style={{ color: '#0f172a' }}>Work Class:</strong> {item.workClass}</div>
-                              <div><strong style={{ color: '#0f172a' }}>Contractor:</strong> {item.contractor}</div>
+                            <p className="text-sm text-slate-700">{item.address}</p>
+                            <div className="grid gap-2 text-sm text-slate-600 md:grid-cols-2 lg:grid-cols-4">
+                              <div><span className="font-medium text-slate-800">Issued:</span> {item.issuedDateLabel}</div>
+                              <div><span className="font-medium text-slate-800">Type:</span> {item.permitType}</div>
+                              <div><span className="font-medium text-slate-800">Work Class:</span> {item.workClass}</div>
+                              <div><span className="font-medium text-slate-800">Contractor:</span> {item.contractor}</div>
                             </div>
                           </div>
-                          <div style={{ display: 'grid', gap: 12, justifyItems: 'start' }}>
-                            <div style={{ color: '#64748b' }}>{item.valuation ? `Valuation: $${Number(item.valuation).toLocaleString()}` : ''}</div>
-                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                              <ActionButton secondary onClick={() => setSelectedRecord(item)}>View Details</ActionButton>
-                              <ActionButton href={buildMapUrl(item.address)} icon={MapPin} secondary>Map</ActionButton>
+                          <div className="flex flex-col items-start gap-3 text-sm text-slate-500 md:items-end">
+                            <div>{item.valuation ? `Valuation: $${Number(item.valuation).toLocaleString()}` : ""}</div>
+                            <div className="flex flex-wrap gap-2">
+                              <Button variant="outline" className="rounded-2xl" onClick={() => setSelectedRecord(item)}>
+                                View Details
+                              </Button>
+                              <Button asChild variant="outline" className="rounded-2xl">
+                                <a href={buildMapUrl(item.address)} target="_blank" rel="noreferrer">
+                                  <MapPin className="mr-2 h-4 w-4" />
+                                  Map
+                                </a>
+                              </Button>
                               <CopyButton value={item.permitNumber} copyState={copyState} setCopyState={setCopyState} label="Permit" />
                             </div>
                           </div>
                         </div>
-                      </div>
-                    )
-                  })}
-                </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
 
-                <div style={{ display: 'grid', gap: 16 }}>
-                  <SectionCard sticky title="Permit detail" description="Focused summary for the currently selected permit.">
+              <div className="space-y-4">
+                <Card className="sticky top-6 rounded-2xl shadow-sm">
+                  <CardHeader>
+                    <CardTitle>Permit detail</CardTitle>
+                    <CardDescription>Focused summary for the currently selected permit.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
                     {selectedRecord ? (
                       <>
-                        <div style={{ fontSize: 22, fontWeight: 700 }}>{selectedRecord.contractor}</div>
-                        <div style={{ marginTop: 4, color: '#64748b' }}>{selectedRecord.permitNumber}</div>
-                        <Divider />
-                        <div style={{ display: 'grid', gap: 12 }}>
-                          <StatRow label="Project address" value={selectedRecord.address} action={<CopyButton value={selectedRecord.address} copyState={copyState} setCopyState={setCopyState} label="Address" />} />
+                        <div>
+                          <div className="text-lg font-semibold text-slate-900">{selectedRecord.contractor}</div>
+                          <div className="mt-1 text-sm text-slate-500">{selectedRecord.permitNumber}</div>
+                        </div>
+                        <Separator />
+                        <div className="space-y-3">
+                          <StatRow
+                            label="Project address"
+                            value={selectedRecord.address}
+                            action={<CopyButton value={selectedRecord.address} copyState={copyState} setCopyState={setCopyState} label="Address" />}
+                          />
                           <StatRow label="Permit status" value={selectedRecord.status} />
                           <StatRow label="Permit type" value={selectedRecord.permitType} />
                           <StatRow label="Work class" value={selectedRecord.workClass} />
                           <StatRow label="Issued date" value={selectedRecord.issuedDateLabel} />
-                          <StatRow label="Permit number" value={selectedRecord.permitNumber} action={<CopyButton value={selectedRecord.permitNumber} copyState={copyState} setCopyState={setCopyState} label="Permit" />} />
-                          <StatRow label="Valuation" value={selectedRecord.valuation ? `$${Number(selectedRecord.valuation).toLocaleString()}` : '—'} />
+                          <StatRow
+                            label="Permit number"
+                            value={selectedRecord.permitNumber}
+                            action={<CopyButton value={selectedRecord.permitNumber} copyState={copyState} setCopyState={setCopyState} label="Permit" />}
+                          />
+                          <StatRow label="Valuation" value={selectedRecord.valuation ? `$${Number(selectedRecord.valuation).toLocaleString()}` : "—"} />
                         </div>
-                        <Divider />
-                        <div style={{ display: 'grid', gap: 12 }}>
-                          <SearchChip icon={Wrench} title="Open selected address in maps" subtitle="Useful for quick field review and area context." actions={<ActionButton href={buildMapUrl(selectedRecord.address)} secondary>Open Map</ActionButton>} />
-                          <SearchChip icon={UserRound} title="Contractor snapshot" subtitle={`Top contractor in filtered results: ${contractorSummary?.topContractor || '—'} (${contractorSummary?.topCount || 0})`} actions={<Pill>{contractorSummary?.uniqueContractors || 0} contractors</Pill>} />
+                        <Separator />
+                        <div className="grid gap-3">
+                          <SearchChip
+                            icon={<Wrench className="h-4 w-4" />}
+                            title="Open selected address in maps"
+                            subtitle="Useful for quick field review and area context."
+                            actions={
+                              <Button asChild variant="outline" className="rounded-2xl">
+                                <a href={buildMapUrl(selectedRecord.address)} target="_blank" rel="noreferrer">Open Map</a>
+                              </Button>
+                            }
+                          />
+                          <SearchChip
+                            icon={<UserRound className="h-4 w-4" />}
+                            title="Contractor snapshot"
+                            subtitle={`Top contractor in filtered results: ${contractorSummary?.topContractor || "—"} (${contractorSummary?.topCount || 0})`}
+                            actions={<Badge variant="secondary">{contractorSummary?.uniqueContractors || 0} contractors</Badge>}
+                          />
                         </div>
-                        <Divider />
-                        <div style={{ display: 'grid', gap: 14 }}>
-                          <Field label={<span style={{ display: 'flex', gap: 8, alignItems: 'center' }}><Tags size={16} /> Tags</span>}>
-                            <TextInput value={selectedMeta.tags} onChange={(e) => updateSelectedMeta({ tags: e.target.value })} placeholder="ex: plumbing, priority, follow-up" />
-                          </Field>
-                          <Field label="Notes">
-                            <TextArea value={selectedMeta.notes} onChange={(e) => updateSelectedMeta({ notes: e.target.value })} placeholder="Store your permit notes here..." />
-                          </Field>
+                        <Separator />
+                        <div className="space-y-3">
+                          <div className="space-y-2">
+                            <label className="flex items-center gap-2 text-sm font-medium">
+                              <Tags className="h-4 w-4" />
+                              Tags
+                            </label>
+                            <Input
+                              value={selectedMeta.tags}
+                              onChange={(e) => updateSelectedMeta({ tags: e.target.value })}
+                              placeholder="ex: plumbing, priority, follow-up"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium">Notes</label>
+                            <Textarea
+                              value={selectedMeta.notes}
+                              onChange={(e) => updateSelectedMeta({ notes: e.target.value })}
+                              placeholder="Store your permit notes here..."
+                              className="min-h-[120px]"
+                            />
+                          </div>
                         </div>
                       </>
                     ) : (
-                      <div style={{ color: '#64748b' }}>Select a result to see its permit details.</div>
+                      <div className="text-sm text-slate-500">Select a result to see its permit details.</div>
                     )}
-                  </SectionCard>
+                  </CardContent>
+                </Card>
 
-                  <SectionCard title="Recent searches" description="Last searches run on this device.">
-                    <div style={{ display: 'grid', gap: 12 }}>
-                      {recentSearches.length ? recentSearches.map((item) => (
-                        <SearchChip key={item.id} icon={Clock3} title={item.label} subtitle={item.createdAt} actions={<ActionButton secondary onClick={() => { applySearchSnapshot(item.snapshot); runSearch(item.snapshot) }}>Run Again</ActionButton>} />
-                      )) : <div style={{ color: '#64748b' }}>No recent searches yet.</div>}
-                    </div>
-                  </SectionCard>
+                <Card className="rounded-2xl shadow-sm">
+                  <CardHeader>
+                    <CardTitle>Recent searches</CardTitle>
+                    <CardDescription>Last searches run on this device.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {recentSearches.length ? recentSearches.map((item) => (
+                      <SearchChip
+                        key={item.id}
+                        icon={<Clock3 className="h-4 w-4" />}
+                        title={item.label}
+                        subtitle={item.createdAt}
+                        actions={
+                          <Button variant="outline" className="rounded-2xl" onClick={() => { applySearchSnapshot(item.snapshot); runSearch(item.snapshot); }}>
+                            Run Again
+                          </Button>
+                        }
+                      />
+                    )) : <div className="text-sm text-slate-500">No recent searches yet.</div>}
+                  </CardContent>
+                </Card>
 
-                  <SectionCard title="Saved searches" description="Stored search presets for repeat use.">
-                    <div style={{ display: 'grid', gap: 12 }}>
-                      {savedSearches.length ? savedSearches.map((item) => (
-                        <SearchChip
-                          key={item.id}
-                          icon={Star}
-                          title={item.label}
-                          subtitle={item.createdAt}
-                          actions={(
-                            <>
-                              <ActionButton secondary onClick={() => { applySearchSnapshot(item.snapshot); runSearch(item.snapshot) }}>Load</ActionButton>
-                              <ActionButton secondary onClick={() => { removeSavedSearch(item.id); setSavedSearches(loadSavedSearches()) }}>Remove</ActionButton>
-                            </>
-                          )}
-                        />
-                      )) : <div style={{ color: '#64748b' }}>No saved searches yet.</div>}
-                    </div>
-                  </SectionCard>
-                </div>
+                <Card className="rounded-2xl shadow-sm">
+                  <CardHeader>
+                    <CardTitle>Saved searches</CardTitle>
+                    <CardDescription>Stored search presets for repeat use.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {savedSearches.length ? savedSearches.map((item) => (
+                      <SearchChip
+                        key={item.id}
+                        icon={<Star className="h-4 w-4" />}
+                        title={item.label}
+                        subtitle={item.createdAt}
+                        actions={
+                          <>
+                            <Button variant="outline" className="rounded-2xl" onClick={() => { applySearchSnapshot(item.snapshot); runSearch(item.snapshot); }}>
+                              Load
+                            </Button>
+                            <Button variant="outline" className="rounded-2xl" onClick={() => { removeSavedSearch(item.id); setSavedSearches(loadSavedSearches()); }}>
+                              Remove
+                            </Button>
+                          </>
+                        }
+                      />
+                    )) : <div className="text-sm text-slate-500">No saved searches yet.</div>}
+                  </CardContent>
+                </Card>
               </div>
             </div>
-          )}
+          </TabsContent>
 
-          {tab === 'dashboard' && (
-            <SectionCard title="Contractor dashboard" description="Grouped contractor view from the current filtered permit result set.">
-              <div style={{ display: 'grid', gap: 16, gridTemplateColumns: '240px 1fr', alignItems: 'end' }}>
-                <Field label="Sort contractors">
-                  <SelectBox
-                    value={contractorViewSort}
-                    onChange={setContractorViewSort}
-                    options={[
-                      { value: 'permits_desc', label: 'Most permits' },
-                      { value: 'valuation_desc', label: 'Highest valuation' },
-                      { value: 'name_asc', label: 'Name A–Z' },
-                    ]}
-                  />
-                </Field>
-                <div style={{ color: '#64748b', fontSize: 14 }}>This dashboard updates based on the current search and filters in the Permit Lookup tab.</div>
-              </div>
-
-              <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', marginTop: 16 }}>
-                {contractorDashboard.length ? contractorDashboard.map((row) => (
-                  <div key={row.contractor} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 18, padding: 16 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'start' }}>
-                      <div>
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><LayoutGrid size={16} /><strong>{row.contractor}</strong></div>
-                        <div style={{ color: '#64748b', fontSize: 14, marginTop: 6 }}>Latest issued: {row.latestIssuedLabel}</div>
-                      </div>
-                      <Pill>{row.permitCount} permits</Pill>
-                    </div>
-                    <Divider />
-                    <div style={{ display: 'grid', gap: 8, fontSize: 14 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#64748b' }}>Unique addresses</span><strong>{row.uniqueAddresses}</strong></div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#64748b' }}>Total valuation</span><strong>${row.totalValuation.toLocaleString()}</strong></div>
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-                      <ActionButton secondary onClick={() => { setContractor(row.contractor); setTab('lookup') }}>Use in Search</ActionButton>
-                      <CopyButton value={row.contractor} copyState={copyState} setCopyState={setCopyState} />
-                    </div>
+          <TabsContent value="dashboard" className="space-y-6">
+            <Card className="rounded-2xl shadow-sm">
+              <CardHeader>
+                <CardTitle>Contractor dashboard</CardTitle>
+                <CardDescription>Grouped contractor view from the current filtered permit result set.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-[240px_1fr]">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Sort contractors</label>
+                    <Select value={contractorViewSort} onValueChange={setContractorViewSort}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="permits_desc">Most permits</SelectItem>
+                        <SelectItem value="valuation_desc">Highest valuation</SelectItem>
+                        <SelectItem value="name_asc">Name A–Z</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
-                )) : <div style={{ color: '#64748b' }}>Run a permit search first to populate the contractor dashboard.</div>}
-              </div>
-            </SectionCard>
-          )}
-
-          {tab === 'contractors' && (
-            <div style={{ display: 'grid', gap: 24, gridTemplateColumns: 'repeat(auto-fit,minmax(320px,1fr))' }}>
-              <SectionCard title="Contractor registration" description="Quick access to the City’s official contractor registration information.">
-                <p style={{ color: '#475569', marginTop: 0 }}>Use this page to review registration requirements and account setup steps for contractor-related permit activity.</p>
-                <ActionButton href="https://www.austintexas.gov/page/contractor-registration" icon={ExternalLink}>Open Contractor Registration</ActionButton>
-              </SectionCard>
-              <SectionCard title="Recommended lookup process" description="Designed to be practical for day-to-day permit research.">
-                <div style={{ display: 'grid', gap: 14, color: '#475569' }}>
-                  <div style={{ display: 'flex', gap: 10 }}><FileSearch size={16} style={{ marginTop: 3 }} /><span>Search permits broadly by address or company using public data.</span></div>
-                  <div style={{ display: 'flex', gap: 10 }}><UserRound size={16} style={{ marginTop: 3 }} /><span>Use the official AB+C Public Search page for a second check when needed.</span></div>
-                  <div style={{ display: 'flex', gap: 10 }}><ShieldCheck size={16} style={{ marginTop: 3 }} /><span>Reserve authenticated account access for records tied to your own authorized use.</span></div>
+                  <div className="flex items-end text-sm text-slate-500">
+                    This dashboard updates based on the current search and filters in the Permit Lookup tab.
+                  </div>
                 </div>
-              </SectionCard>
-            </div>
-          )}
 
-          {tab === 'resources' && (
-            <div style={{ display: 'grid', gap: 24, gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))' }}>
-              <SectionCard title="AB+C Public Search" description="Official City lookup page."><ActionButton href="https://abc.austintexas.gov/web/permit/public-search-other" icon={ExternalLink}>Open Public Search</ActionButton></SectionCard>
-              <SectionCard title="Open Data Portal" description="City datasets for broader searching."><ActionButton href="https://data.austintexas.gov/" icon={ExternalLink}>Open Data Portal</ActionButton></SectionCard>
-              <SectionCard title="Contractor Registration" description="Registration requirements and guidance."><ActionButton href="https://www.austintexas.gov/page/contractor-registration" icon={ExternalLink}>Open Registration Page</ActionButton></SectionCard>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {contractorDashboard.length ? contractorDashboard.map((row) => (
+                    <Card key={row.contractor} className="rounded-2xl border bg-white shadow-none">
+                      <CardContent className="space-y-3 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <LayoutGrid className="h-4 w-4" />
+                              <div className="font-semibold text-slate-900">{row.contractor}</div>
+                            </div>
+                            <div className="mt-1 text-sm text-slate-500">Latest issued: {row.latestIssuedLabel}</div>
+                          </div>
+                          <Badge variant="secondary">{row.permitCount} permits</Badge>
+                        </div>
+                        <Separator />
+                        <div className="space-y-2 text-sm">
+                          <div className="flex justify-between gap-3"><span className="text-slate-500">Unique addresses</span><span className="font-medium">{row.uniqueAddresses}</span></div>
+                          <div className="flex justify-between gap-3"><span className="text-slate-500">Total valuation</span><span className="font-medium">${row.totalValuation.toLocaleString()}</span></div>
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          <Button variant="outline" className="rounded-2xl" onClick={() => setContractor(row.contractor)}>
+                            Use in Search
+                          </Button>
+                          <CopyButton value={row.contractor} copyState={copyState} setCopyState={setCopyState} label="Copy" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )) : (
+                    <Card className="rounded-2xl shadow-sm">
+                      <CardContent className="p-6 text-sm text-slate-500">
+                        Run a permit search first to populate the contractor dashboard.
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="contractors" className="space-y-6">
+            <div className="grid gap-6 md:grid-cols-2">
+              <Card className="rounded-2xl shadow-sm">
+                <CardHeader>
+                  <CardTitle>Contractor registration</CardTitle>
+                  <CardDescription>Quick access to the City’s official contractor registration information.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4 text-sm text-slate-700">
+                  <p>
+                    Use this page to review registration requirements and account setup steps for contractor-related permit activity.
+                  </p>
+                  <Button asChild className="rounded-2xl">
+                    <a href={contractorRegistrationLink} target="_blank" rel="noreferrer">
+                      Open Contractor Registration
+                      <ExternalLink className="ml-2 h-4 w-4" />
+                    </a>
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-2xl shadow-sm">
+                <CardHeader>
+                  <CardTitle>Recommended lookup process</CardTitle>
+                  <CardDescription>Designed to be practical for day-to-day permit research.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm text-slate-700">
+                  <div className="flex gap-3"><FileSearch className="mt-0.5 h-4 w-4 shrink-0" /><p>Search permits broadly by address or company using public data.</p></div>
+                  <div className="flex gap-3"><UserRound className="mt-0.5 h-4 w-4 shrink-0" /><p>Use the official AB+C Public Search page for a second check when needed.</p></div>
+                  <div className="flex gap-3"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" /><p>Reserve authenticated account access for records tied to your own authorized use.</p></div>
+                </CardContent>
+              </Card>
             </div>
-          )}
-        </div>
+          </TabsContent>
+
+          <TabsContent value="resources" className="space-y-6">
+            <div className="grid gap-6 md:grid-cols-3">
+              <Card className="rounded-2xl shadow-sm">
+                <CardHeader>
+                  <CardTitle>AB+C Public Search</CardTitle>
+                  <CardDescription>Official City lookup page.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button asChild className="w-full rounded-2xl">
+                    <a href={publicSearchLink} target="_blank" rel="noreferrer">
+                      Open Public Search
+                      <ExternalLink className="ml-2 h-4 w-4" />
+                    </a>
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-2xl shadow-sm">
+                <CardHeader>
+                  <CardTitle>Open Data Portal</CardTitle>
+                  <CardDescription>City datasets for broader searching.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button asChild variant="outline" className="w-full rounded-2xl">
+                    <a href={openDataLink} target="_blank" rel="noreferrer">
+                      Open Data Portal
+                      <ExternalLink className="ml-2 h-4 w-4" />
+                    </a>
+                  </Button>
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-2xl shadow-sm">
+                <CardHeader>
+                  <CardTitle>Contractor Registration</CardTitle>
+                  <CardDescription>Registration requirements and guidance.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button asChild variant="outline" className="w-full rounded-2xl">
+                    <a href={contractorRegistrationLink} target="_blank" rel="noreferrer">
+                      Open Registration Page
+                      <ExternalLink className="ml-2 h-4 w-4" />
+                    </a>
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
-    </AppShell>
-  )
+    </div>
+  );
 }
